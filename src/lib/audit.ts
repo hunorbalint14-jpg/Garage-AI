@@ -86,6 +86,7 @@ export type AuditAction =
   | "job.clock_pause"
   | "job.clock_resume"
   | "job.time_adjust"
+  | "job.odometer_set"
   // Passkeys
   | "passkey.register"
   | "passkey.revoke"
@@ -100,6 +101,9 @@ export type AuditAction =
   // Vehicles
   | "vehicle.create"
   | "vehicle.delete"
+  | "vehicle.wheel_profile_update"
+  | "vehicle.wheel_service_recorded"
+  | "vehicle.wheel_service_deleted"
   // Invoices (financial)
   | "invoice.create"
   | "invoice.send"

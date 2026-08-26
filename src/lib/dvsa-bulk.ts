@@ -1,5 +1,6 @@
 import { createInflateRaw } from "node:zlib";
 import { getAccessToken } from "./dvla-auth";
+import { odometerToMiles } from "./mot-history";
 
 // DVSA MOT History API — bulk-download endpoint. Lists a weekly bulk file
 // plus daily delta files (every vehicle created/updated/deleted in the last
@@ -164,6 +165,15 @@ export class JsonRecordScanner {
 // Delta record extraction
 // ---------------------------------------------------------------------------
 
+export type DeltaMotTest = {
+  /** YYYY-MM-DD */
+  testDate: string;
+  result: string | null;
+  /** Normalised to miles at extraction (KM readings converted). */
+  odometerMiles: number | null;
+  defects: { text: string; type: string }[];
+};
+
 export type DeltaVehicleUpdate = {
   registration: string;
   normalizedReg: string;
@@ -176,6 +186,12 @@ export type DeltaVehicleUpdate = {
   motExpiry: string | null;
   /** Most recent completed test date, YYYY-MM-DD. */
   lastTestDate: string | null;
+  /**
+   * Full parsed test history from the record (#596) — the delta record is
+   * the complete vehicle record, so each matched vehicle gets its whole
+   * odometer + defect series refreshed nightly at zero extra API cost.
+   */
+  tests: DeltaMotTest[];
 };
 
 export function normalizeRegistration(reg: string): string {
@@ -199,14 +215,38 @@ export function extractDeltaUpdate(record: Record<string, unknown>): DeltaVehicl
   const modification =
     rawMod === "CREATED" || rawMod === "UPDATED" || rawMod === "DELETED" ? rawMod : null;
 
-  type RawTest = { completedDate?: unknown; testResult?: unknown; expiryDate?: unknown };
+  type RawTest = {
+    completedDate?: unknown;
+    testResult?: unknown;
+    expiryDate?: unknown;
+    odometerValue?: unknown;
+    odometerUnit?: unknown;
+    defects?: unknown;
+    rfrAndComments?: unknown;
+  };
   const tests = Array.isArray(record.motTests) ? (record.motTests as RawTest[]) : [];
 
   let motExpiry: string | null = null;
   let lastTestDate: string | null = parseDvsaDate(record.lastMotTestDate);
+  const parsedTests: DeltaMotTest[] = [];
   for (const t of tests) {
     const completed = parseDvsaDate(t.completedDate);
-    if (completed && (!lastTestDate || completed > lastTestDate)) lastTestDate = completed;
+    if (completed) {
+      if (!lastTestDate || completed > lastTestDate) lastTestDate = completed;
+      const rawDefects = Array.isArray(t.defects)
+        ? t.defects
+        : Array.isArray(t.rfrAndComments) // legacy payload name
+          ? t.rfrAndComments
+          : [];
+      parsedTests.push({
+        testDate: completed,
+        result: typeof t.testResult === "string" ? t.testResult.toUpperCase() : null,
+        odometerMiles: odometerToMiles(t.odometerValue, t.odometerUnit),
+        defects: (rawDefects as { text?: unknown; type?: unknown }[])
+          .filter((d) => typeof d?.text === "string")
+          .map((d) => ({ text: String(d.text), type: String(d.type ?? "ADVISORY") })),
+      });
+    }
     if (String(t.testResult ?? "").toUpperCase() !== "PASSED") continue;
     const expiry = parseDvsaDate(t.expiryDate);
     if (expiry && (!motExpiry || expiry > motExpiry)) motExpiry = expiry;
@@ -220,6 +260,7 @@ export function extractDeltaUpdate(record: Record<string, unknown>): DeltaVehicl
     modification,
     motExpiry,
     lastTestDate,
+    tests: parsedTests,
   };
 }
 

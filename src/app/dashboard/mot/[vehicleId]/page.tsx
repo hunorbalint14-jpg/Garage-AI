@@ -4,6 +4,7 @@ import { ArrowLeft, CheckCircle, XCircle, AlertTriangle, Gauge } from "lucide-re
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPortalContext } from "@/lib/portal-auth";
 import { lookupMotHistory, type MotTest } from "@/lib/dvla";
+import { motTestsToRows, persistMotTests } from "@/lib/mot-history";
 import { cacheGet, cacheSet } from "@/lib/redis";
 import { AnimatedBackground } from "@/components/animated-background";
 
@@ -46,7 +47,7 @@ export default async function MotHistoryPage({
   const admin = createAdminClient();
   const { data: vehicle } = await admin
     .from("vehicles")
-    .select("id, registration, make, model, year")
+    .select("id, registration, make, model, year, organization_id")
     .eq("id", vehicleId)
     .eq("customer_id", customer.id)
     .maybeSingle();
@@ -67,6 +68,13 @@ export default async function MotHistoryPage({
         tests: result.tests,
       };
       await cacheSet(cacheKey, history, MOT_CACHE_TTL_SEC);
+      // Write-through to mot_tests (#596) — the cache-miss fetch is the one
+      // moment we hold the full series without spending extra DVSA quota.
+      // Never blocks the page: persistMotTests swallows its own errors.
+      await persistMotTests(
+        admin,
+        motTestsToRows(vehicle.id, vehicle.organization_id, result.tests, "lookup"),
+      );
     } else {
       lookupFailed = true;
     }
