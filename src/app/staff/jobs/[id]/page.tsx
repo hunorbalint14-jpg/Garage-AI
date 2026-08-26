@@ -61,6 +61,7 @@ async function existingAuthProp(
 import { isFeatureEnabled } from "@/lib/feature-flags";
 import { JobTimeTracking, type TimeEntryView } from "./job-time-tracking";
 import { HighVoltageSection } from "./high-voltage-section";
+import { OdometerSection } from "./odometer-section";
 
 type Job = {
   id: string;
@@ -73,6 +74,7 @@ type Job = {
   booking_id: string | null;
   assigned_to: string | null;
   high_voltage: boolean;
+  odometer_miles: number | null;
   customer: { id: string; full_name: string | null; email: string | null; phone: string | null } | null;
   vehicle: { id: string; registration: string; make: string | null; model: string | null; year: number | null } | null;
 };
@@ -103,7 +105,7 @@ export default async function JobDetailPage({
     admin
       .from("jobs")
       .select(
-        "id, status, description, notes, created_at, completed_at, location_id, booking_id, assigned_to, high_voltage, customer:customers(id, full_name, email, phone), vehicle:vehicles(id, registration, make, model, year)",
+        "id, status, description, notes, created_at, completed_at, location_id, booking_id, assigned_to, high_voltage, odometer_miles, customer:customers(id, full_name, email, phone), vehicle:vehicles(id, registration, make, model, year)",
       )
       .eq("id", id)
       .maybeSingle(),
@@ -223,6 +225,8 @@ export default async function JobDetailPage({
           assignAction={assignJobTechnician}
         />
       </section>
+
+      <OdometerSection jobId={job.id} initialMiles={job.odometer_miles} />
 
       <HighVoltageSection
         jobId={job.id}

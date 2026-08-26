@@ -83,13 +83,52 @@ describe("extractDeltaUpdate", () => {
         { completedDate: "2026-06-09T09:00:00Z", testResult: "FAILED" },
       ],
     });
-    expect(update).toEqual({
+    expect(update).toMatchObject({
       registration: "AB12 CDE",
       normalizedReg: "AB12CDE",
       modification: "UPDATED",
       motExpiry: "2027-06-08",
       lastTestDate: "2026-06-09",
-    } satisfies DeltaVehicleUpdate);
+    });
+    expect(update?.tests).toHaveLength(3);
+  });
+
+  it("parses the full test series with odometer and defects (#596)", () => {
+    const update = extractDeltaUpdate({
+      registration: "AB12 CDE",
+      motTests: [
+        {
+          completedDate: "2026-06-09T10:00:00Z",
+          testResult: "passed",
+          expiryDate: "2027-06-08",
+          odometerValue: "45210",
+          odometerUnit: "MI",
+          defects: [{ text: "Nearside front tyre worn on inner edge", type: "ADVISORY" }],
+        },
+        {
+          completedDate: "2025-06-01T10:00:00Z",
+          testResult: "PASSED",
+          odometerValue: "60000",
+          odometerUnit: "KM",
+          rfrAndComments: [{ text: "Offside rear tyre slightly perished" }], // legacy shape
+        },
+        { completedDate: null, testResult: "PASSED", odometerValue: "1" }, // dateless → dropped
+      ],
+    });
+    expect(update?.tests).toEqual([
+      {
+        testDate: "2026-06-09",
+        result: "PASSED",
+        odometerMiles: 45210,
+        defects: [{ text: "Nearside front tyre worn on inner edge", type: "ADVISORY" }],
+      },
+      {
+        testDate: "2025-06-01",
+        result: "PASSED",
+        odometerMiles: 37282,
+        defects: [{ text: "Offside rear tyre slightly perished", type: "ADVISORY" }],
+      },
+    ] satisfies DeltaVehicleUpdate["tests"]);
   });
 
   it("uses motTestDueDate for never-tested vehicles", () => {

@@ -316,6 +316,45 @@ export async function assignJobTechnician(
   return { success: true };
 }
 
+export type SetOdometerResult = { error: string } | { success: true };
+
+// Visit odometer (#596) — the freshest anchor the tyre-care mileage estimate
+// re-anchors to. Prompt-but-allow: the job card nags when it's missing, but
+// nothing blocks on it (a wall here just breeds invented numbers).
+export async function setJobOdometer(
+  jobId: string,
+  odometerMiles: number | null,
+): Promise<SetOdometerResult> {
+  const ctx = await requireStaffContext();
+  const admin = createAdminClient();
+
+  if (odometerMiles !== null) {
+    if (!Number.isInteger(odometerMiles) || odometerMiles < 0 || odometerMiles > 1_500_000) {
+      return { error: "Enter the mileage as a whole number." };
+    }
+  }
+
+  const { error } = await admin
+    .from("jobs")
+    .update({ odometer_miles: odometerMiles })
+    .eq("id", jobId)
+    .eq("location_id", ctx.location.id);
+  if (error) return { error: error.message };
+
+  await logAudit({
+    organizationId: ctx.organization.id,
+    actorUserId: ctx.user.id,
+    actorEmail: ctx.user.email ?? null,
+    action: "job.odometer_set",
+    entityType: "job",
+    entityId: jobId,
+    metadata: { odometer_miles: odometerMiles },
+  });
+
+  revalidatePath(`/staff/jobs/${jobId}`);
+  return { success: true };
+}
+
 export type SetHighVoltageResult = { error: string } | { success: true };
 
 export async function setJobHighVoltage(

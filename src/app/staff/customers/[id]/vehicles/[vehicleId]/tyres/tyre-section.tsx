@@ -16,6 +16,7 @@ type TyreCheck = {
   osf_replaced: boolean;
   nsr_replaced: boolean;
   osr_replaced: boolean;
+  odometer_miles: number | null;
   notes: string | null;
 };
 
@@ -89,15 +90,30 @@ export function TyreSection({ vehicleId, customerId, checks }: Props) {
       {/* Add form */}
       {open && (
         <form onSubmit={handleSubmit} className="rounded-lg border p-4 flex flex-col gap-4 bg-muted/20">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Date</label>
-            <input
-              name="checkedAt"
-              type="date"
-              defaultValue={new Date().toISOString().split("T")[0]}
-              disabled={pending}
-              className="w-40 rounded border border-black/20 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            />
+          <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Date</label>
+              <input
+                name="checkedAt"
+                type="date"
+                defaultValue={new Date().toISOString().split("T")[0]}
+                disabled={pending}
+                className="w-40 rounded border border-black/20 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">Mileage</label>
+              <input
+                name="odometer_miles"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                placeholder="e.g. 45210"
+                disabled={pending}
+                className="w-32 rounded border border-black/20 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -176,6 +192,7 @@ export function TyreSection({ vehicleId, customerId, checks }: Props) {
                 <th className="px-3 py-2 font-medium text-xs text-center">OSF</th>
                 <th className="px-3 py-2 font-medium text-xs text-center">NSR</th>
                 <th className="px-3 py-2 font-medium text-xs text-center">OSR</th>
+                <th className="px-3 py-2 font-medium text-xs text-right">Miles</th>
                 <th className="px-3 py-2 font-medium text-xs">Notes</th>
                 <th className="px-3 py-2" />
               </tr>
@@ -190,6 +207,9 @@ export function TyreSection({ vehicleId, customerId, checks }: Props) {
                   <td className="px-3 py-2 text-center">{depthBadge(c.osf_depth, c.osf_replaced)}</td>
                   <td className="px-3 py-2 text-center">{depthBadge(c.nsr_depth, c.nsr_replaced)}</td>
                   <td className="px-3 py-2 text-center">{depthBadge(c.osr_depth, c.osr_replaced)}</td>
+                  <td className="px-3 py-2 text-right font-mono text-xs text-muted-foreground">
+                    {c.odometer_miles !== null ? c.odometer_miles.toLocaleString("en-GB") : "—"}
+                  </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground max-w-[160px] truncate">{c.notes ?? "—"}</td>
                   <td className="px-3 py-2 text-right">
                     <button

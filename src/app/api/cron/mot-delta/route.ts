@@ -10,6 +10,7 @@ import {
   type BulkFileInfo,
   type DeltaVehicleUpdate,
 } from "@/lib/dvsa-bulk";
+import { persistMotTests, type MotTestRow } from "@/lib/mot-history";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -32,6 +33,7 @@ const ELSEWHERE_WINDOW_DAYS = 7;
 type VehicleRow = {
   id: string;
   location_id: string;
+  organization_id: string;
   registration: string;
   mot_expiry: string | null;
   last_mot_test_date: string | null;
@@ -43,7 +45,7 @@ async function loadAllVehicles(admin: ReturnType<typeof createAdminClient>) {
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await admin
       .from("vehicles")
-      .select("id, location_id, registration, mot_expiry, last_mot_test_date")
+      .select("id, location_id, organization_id, registration, mot_expiry, last_mot_test_date")
       .range(from, from + pageSize - 1);
     if (error) throw new Error(`vehicles page load failed: ${error.message}`);
     const rows = (data ?? []) as VehicleRow[];
@@ -160,11 +162,33 @@ async function processFile(
   let scanned = 0;
   let matched = 0;
   const pending: PendingUpdate[] = [];
+  const testRows: MotTestRow[] = [];
 
   try {
     const zip = await downloadDeltaFile(file);
     const result = await scanDeltaZip(zip, (update) => {
       matched += collectMatches(update, byReg, pending);
+      // Persist the full test series for every matched vehicle (#596) — the
+      // delta record is the complete history, and it only appears on the day
+      // the vehicle's MOT data changed, so this is the cheap refresh moment.
+      if (update.modification !== "DELETED" && update.tests.length > 0) {
+        const rows = byReg.get(update.normalizedReg);
+        if (rows) {
+          for (const vehicle of rows) {
+            for (const t of update.tests) {
+              testRows.push({
+                vehicle_id: vehicle.id,
+                organization_id: vehicle.organization_id,
+                test_date: t.testDate,
+                result: t.result,
+                odometer_miles: t.odometerMiles,
+                defects: t.defects,
+                source: "delta",
+              });
+            }
+          }
+        }
+      }
     });
     scanned = result.scanned;
 
@@ -185,6 +209,10 @@ async function processFile(
       if (p.lastTestDate !== null) p.vehicle.last_mot_test_date = p.lastTestDate;
     }
 
+    // Enrichment, not correctness: a failed mot_tests write must not fail the
+    // file (the expiry/win-back updates above already landed).
+    const persisted = await persistMotTests(admin, testRows);
+
     await admin.from("mot_delta_runs").insert({
       filename: file.filename,
       file_created_on: file.fileCreatedOn || null,
@@ -195,7 +223,7 @@ async function processFile(
       moted_elsewhere_count: elsewhere.size,
       duration_ms: Date.now() - t0,
     });
-    return { updated, elsewhere: elsewhere.size };
+    return { updated, elsewhere: elsewhere.size, tests: persisted.upserted, testsError: persisted.error };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await admin.from("mot_delta_runs").insert({
@@ -252,6 +280,8 @@ export async function GET(request: NextRequest) {
   let processed = 0;
   let updated = 0;
   let elsewhere = 0;
+  let tests = 0;
+  let testsError: string | null = null;
   let failure: string | null = null;
 
   for (const file of pendingFiles) {
@@ -261,13 +291,15 @@ export async function GET(request: NextRequest) {
       processed++;
       updated += result.updated;
       elsewhere += result.elsewhere;
+      tests += result.tests;
+      if (result.testsError) testsError = result.testsError;
     } catch (err) {
       failure = err instanceof Error ? err.message : String(err);
       break; // keep ordering: don't skip a failed day's file
     }
   }
 
-  const detail = `files ${processed}/${pendingFiles.length}, updated ${updated}, elsewhere ${elsewhere}${failure ? `, error: ${failure.slice(0, 120)}` : ""}`;
+  const detail = `files ${processed}/${pendingFiles.length}, updated ${updated}, elsewhere ${elsewhere}, tests ${tests}${testsError ? `, tests error: ${testsError.slice(0, 80)}` : ""}${failure ? `, error: ${failure.slice(0, 120)}` : ""}`;
   await recordCronRun(admin, "cron/mot-delta", failure === null, Date.now() - __t0, detail);
 
   if (failure !== null) {
@@ -279,5 +311,6 @@ export async function GET(request: NextRequest) {
     pending: pendingFiles.length - processed,
     updated,
     moted_elsewhere: elsewhere,
+    mot_tests_upserted: tests,
   });
 }

@@ -4,6 +4,11 @@ import { requireStaffContext } from "@/lib/staff-context";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { EditVehicleForm } from "./edit-vehicle-form";
 import { TyreSection } from "../tyres/tyre-section";
+import {
+  WheelCareSection,
+  type WheelProfile,
+  type WheelServiceEvent,
+} from "../tyres/wheel-care-section";
 
 type TyreCheck = {
   id: string;
@@ -16,6 +21,7 @@ type TyreCheck = {
   osf_replaced: boolean;
   nsr_replaced: boolean;
   osr_replaced: boolean;
+  odometer_miles: number | null;
   notes: string | null;
 };
 
@@ -28,7 +34,7 @@ export default async function EditVehiclePage({
   const ctx = await requireStaffContext();
   const admin = createAdminClient();
 
-  const [vehicleRes, tyresRes] = await Promise.all([
+  const [vehicleRes, tyresRes, profileRes, eventsRes] = await Promise.all([
     admin
       .from("vehicles")
       .select("id, registration, make, model, year, mot_expiry, service_due")
@@ -38,15 +44,28 @@ export default async function EditVehiclePage({
       .maybeSingle(),
     admin
       .from("tyre_checks")
-      .select("id, checked_at, nsf_depth, osf_depth, nsr_depth, osr_depth, nsf_replaced, osf_replaced, nsr_replaced, osr_replaced, notes")
+      .select("id, checked_at, nsf_depth, osf_depth, nsr_depth, osr_depth, nsf_replaced, osf_replaced, nsr_replaced, osr_replaced, odometer_miles, notes")
       .eq("vehicle_id", vehicleId)
       .order("checked_at", { ascending: false })
+      .limit(20),
+    admin
+      .from("vehicle_wheel_profile")
+      .select("tyre_config, notes")
+      .eq("vehicle_id", vehicleId)
+      .maybeSingle(),
+    admin
+      .from("wheel_service_events")
+      .select("id, service_type, performed_at, odometer_miles")
+      .eq("vehicle_id", vehicleId)
+      .order("performed_at", { ascending: false })
       .limit(20),
   ]);
 
   if (!vehicleRes.data) notFound();
   const vehicle = vehicleRes.data;
   const tyreChecks = (tyresRes.data ?? []) as TyreCheck[];
+  const wheelProfile = (profileRes.data ?? null) as WheelProfile;
+  const wheelEvents = (eventsRes.data ?? []) as WheelServiceEvent[];
 
   return (
     <div className="flex flex-col gap-6 max-w-lg">
@@ -62,6 +81,15 @@ export default async function EditVehiclePage({
 
       <section className="rounded-lg border p-4 flex flex-col gap-3">
         <TyreSection vehicleId={vehicleId} customerId={id} checks={tyreChecks} />
+      </section>
+
+      <section className="rounded-lg border p-4 flex flex-col gap-3">
+        <WheelCareSection
+          vehicleId={vehicleId}
+          customerId={id}
+          profile={wheelProfile}
+          events={wheelEvents}
+        />
       </section>
     </div>
   );
